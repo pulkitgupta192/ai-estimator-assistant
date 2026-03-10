@@ -1,0 +1,24 @@
+app:
+  runtime:
+    name: nodejs20.x
+
+modules:
+  trigger:
+    - key: issue-created-trigger
+      function: estimate-effort
+      events:
+        - avi:jira:created:issue
+
+  function:
+    - key: estimate-effort
+      handler: index.run
+
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+
+  external:
+    fetch:
+      backend:
+        - api.openai.com

@@ -1,0 +1,9 @@
+{
+  "name": "jira-ai-estimator",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "dependencies": {
+    "@forge/api": "^4.0.0",
+    "node-fetch": "^2.6.7"
+  }
+}

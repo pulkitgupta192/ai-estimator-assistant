@@ -1,6 +1,7 @@
 app:
   runtime:
     name: nodejs20.x
+  id: ari:cloud:ecosystem::app/78e0ff62-e76d-4e3e-9a20-bb510e4585ed
 
 modules:
   trigger:

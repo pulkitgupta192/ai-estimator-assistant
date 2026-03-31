@@ -1,140 +1,163 @@
 import fetch from "node-fetch";
-// ✅ no abort-controller import
+
+/**
+ * FINAL VERSION — OpenAI Estimator Provider
+ * -----------------------------------------
+ * Features:
+ * ✅ Strict JSON-only output (response_format = json_object)
+ * ✅ No hallucination / no apologies
+ * ✅ Guaranteed numeric effort
+ * ✅ Includes complexity, direction, flow & reasoning for future use
+ * ✅ Fully compatible with Jira Forge parsing
+ */
 
 export async function openaiEstimate(summary, description, model) {
   const OPENAI_KEY = process.env.OPENAI_API_KEY;
+
   if (!OPENAI_KEY) {
-    return { ok: false, code: "CONFIG", message: "Missing OPENAI_API_KEY", retryable: false };
+    return {
+      ok: false,
+      code: "CONFIG",
+      message: "Missing OPENAI_API_KEY",
+      retryable: false
+    };
   }
 
+  // ✅ FULL ENTERPRISE PROMPT (STRICT JSON)
   const prompt = `
-Estimate development effort in hours.
+You are an expert Senior IFS Technical Architect specializing in effort estimation.
 
-Summary:
-${summary}
+Your job is to estimate ONLY the development effort (in hours) for a Jira ticket.
 
-Description:
-${description}
+STRICT OUTPUT FORMAT:
+Return ONLY this JSON object with no additional text:
+{
+  "effort": <number>,
+  "complexity": "<Very Simple | Simple | Medium | Complex | Very Complex>",
+  "direction": "<Inbound | Outbound>",
+  "flow": "<Uni-Directional | Bi-Directional>",
+  "reason": "<short markdown explanation>"
+}
 
-Return only a number.
+RULES:
+- Never output anything except valid JSON.
+- Never apologise.
+- Never ask for more details.
+- If unclear, estimate your closest reasonable numeric effort.
+- "effort" must be > 0.
+- JSON must always be valid.
+
+### COMPLEXITY RUBRIC:
+1. Very Simple:
+   - Basic configuration, small UI tasks, single-view Quick Reports.
+   - No logic, no PL/SQL, minimal joins.
+
+2. Simple:
+   - Single table or simple join.
+   - Basic Event Actions, formatting changes.
+
+3. Medium:
+   - Multi-view joins (2–3), PL/SQL wrapper, custom fields with expressions.
+   - Simple bi-directional sync.
+
+4. Complex:
+   - 4+ table joins, PL/SQL API package, heavy validation logic.
+   - Performance tuning required.
+
+5. Very Complex:
+   - New LUs, complex data migrations, deep IFS core logic modifications.
+
+### DIRECTION & FLOW:
+Infer based on description.
+
+### INTERNAL EFFORT LOGIC (must be applied):
+- Base Design Days = 3.1625
+- Weightage:
+    Very Simple = 0.2  
+    Simple = 0.5  
+    Medium = 0.75  
+    Complex = 1.0  
+    Very Complex = 2.0  
+- Convert days → hours (1 day = 8 hours)
+- effort = Tech Design Hours + Dev Hours + Review + Docs + Mgmt + Testing
+
+INPUT:
+Summary: ${summary}
+Description: ${description}
 `.trim();
-
-  const controller = new AbortController();
-  const timeoutMs = 15000;
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${OPENAI_KEY}`
       },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2
+        temperature: 0,
+        response_format: { type: "json_object" }, // ✅ HARD JSON ENFORCEMENT
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ]
       })
     });
 
-    const data = await response.json().catch(() => null);
+    const data = await response.json();
     console.log("OpenAI Response:", JSON.stringify({ status: response.status, data }));
 
-    if (!response.ok || data?.error) {
-      const err = data?.error || {};
-      const openAiCode = err.code || err.type || "unknown_error";
-
-      if (openAiCode === "insufficient_quota") {
-        return {
-          ok: false,
-          code: "AI_QUOTA",
-          message: "OpenAI quota exceeded. Check billing/limits for the API key’s org.",
-          retryable: false,
-          status: response.status,
-          detail: err
-        };
-      }
-
-      if (response.status === 429) {
-        return {
-          ok: false,
-          code: "AI_RATE_LIMIT",
-          message: "OpenAI rate limit reached. Retry later.",
-          retryable: true,
-          status: response.status,
-          detail: err
-        };
-      }
-
-      if (response.status === 401 || response.status === 403) {
-        return {
-          ok: false,
-          code: "AI_AUTH",
-          message: "OpenAI authentication/authorization failed. Verify API key and org.",
-          retryable: false,
-          status: response.status,
-          detail: err
-        };
-      }
-
+    if (!response.ok) {
       return {
         ok: false,
         code: "AI_UPSTREAM",
-        message: err.message || "OpenAI request failed.",
-        retryable: response.status >= 500 || response.status === 429,
-        status: response.status,
-        detail: err
-      };
-    }
-
-    const raw = data?.choices?.[0]?.message?.content?.trim();
-    if (!raw) {
-      return {
-        ok: false,
-        code: "AI_EMPTY",
-        message: "OpenAI returned an empty completion.",
-        retryable: true,
+        message: data?.error?.message || "OpenAI request failed.",
+        retryable: response.status >= 500,
         status: response.status,
         detail: data
       };
     }
 
-    const match = raw.match(/-?\d+(\.\d+)?/);
-    if (!match) {
+    // ✅ Always valid JSON due to response_format
+    let parsed;
+    try {
+      parsed = JSON.parse(data.choices[0].message.content);
+    } catch (err) {
       return {
         ok: false,
         code: "AI_PARSE",
-        message: "OpenAI did not return a valid numeric effort.",
+        message: "OpenAI returned invalid JSON.",
         retryable: true,
-        status: response.status,
-        detail: { raw }
+        detail: { raw: data }
       };
     }
 
-    const effort = Number(match[0]);
-    if (!Number.isFinite(effort) || effort < 0) {
+    // ✅ Validate "effort"
+    if (!parsed.effort || typeof parsed.effort !== "number") {
       return {
         ok: false,
         code: "AI_PARSE",
-        message: "Parsed effort is invalid.",
+        message: "'effort' missing or invalid.",
         retryable: true,
-        status: response.status,
-        detail: { raw, parsed: effort }
+        detail: parsed
       };
     }
 
-    return { ok: true, effort, raw };
+    return {
+      ok: true,
+      effort: parsed.effort,
+      meta: parsed // includes complexity, direction, flow, reasoning
+    };
+
   } catch (e) {
-    const isTimeout = e?.name === "AbortError";
     return {
       ok: false,
-      code: isTimeout ? "TIMEOUT" : "NETWORK",
-      message: isTimeout ? "OpenAI call timed out." : "Network error calling OpenAI.",
+      code: "NETWORK",
+      message: "Network error calling OpenAI.",
       retryable: true,
       detail: { name: e?.name, message: e?.message }
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }

@@ -1,46 +1,61 @@
-import api, { route } from "@forge/api"
-import { estimate } from "./ai-router.js"
+import api, { route } from "@forge/api";
+import { estimate } from "./ai-router.js";
 
 export const run = async (event) => {
+  // ✅ Extract Issue Key correctly
+  const issueKey = event.issue.key;
+  console.log("Issue Key:", issueKey);
 
-  const issueKey = event.issue.key
-
-  const issue = await api
+  // ✅ Fetch full issue details
+  const issueResponse = await api
     .asApp()
-    .requestJira(route`/rest/api/3/issue/${issueKey}`)
+    .requestJira(route`/rest/api/3/issue/${issueKey}`);
 
-  const data = await issue.json()
+  const data = await issueResponse.json();
 
-  const summary = data.fields.summary || ""
+  // ✅ Extract summary
+  const summary = data.fields.summary || "";
 
-  let description = ""
-
+  // ✅ Extract plain-text description safely
+  let description = "";
   try {
     description =
-      data.fields.description.content[0].content[0].text || ""
+      data.fields.description?.content?.[0]?.content?.[0]?.text || "";
   } catch {
-    description = ""
+    description = "";
   }
 
-  console.log("Summary:", summary)
-  console.log("Description:", description)
+  console.log("Summary:", summary);
+  console.log("Description:", description);
 
-  const effort = await estimate(summary, description)
+  // ✅ Call estimator WITH issueKey
+  const estResult = await estimate(summary, description, issueKey);
+  console.log("Estimated Effort:", estResult);
 
-  console.log("Estimated Effort:", effort)
+  // ✅ Handle estimator error
+  if (!estResult.ok) {
+    console.log("Estimator returned error:", estResult.error);
+    return estResult;
+  }
 
+  const hours = estResult.data.effort;
+
+  // ✅ Update Jira Original Estimate field
   await api.asApp().requestJira(route`/rest/api/3/issue/${issueKey}`, {
     method: "PUT",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       fields: {
         timetracking: {
-          originalEstimate: effort + "h"
-        }
-      }
-    })
-  })
+          originalEstimate: `${hours}h`,
+        },
+      },
+    }),
+  });
 
-}
+  console.log("✅ Jira Original Estimate updated.");
+
+  return estResult;
+};

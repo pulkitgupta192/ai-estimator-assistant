@@ -18,10 +18,11 @@ permissions:
   scopes:
     - read:jira-work
     - write:jira-work
+    - read:jira-user
 
   external:
     fetch:
       backend:
-        - api.openai.com
-        - generativelanguage.googleapis.com
-        - 192.168.1.5       
+        - address: api.openai.com
+        - address: generativelanguage.googleapis.com
+        - address: 192.168.1.5

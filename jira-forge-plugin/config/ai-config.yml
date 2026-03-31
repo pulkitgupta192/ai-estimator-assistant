@@ -1,0 +1,18 @@
+provider: local
+
+models:
+
+  openai:
+    model: gpt-4o-mini
+    temperature: 0.2
+
+  gemini:
+    model: gemini-1.5-pro
+    temperature: 0.2
+  
+  azure:
+    model: gpt-4o
+    temperature: 0.2
+  
+  local:
+    endpoint: http://192.168.1.5:8080/estimate

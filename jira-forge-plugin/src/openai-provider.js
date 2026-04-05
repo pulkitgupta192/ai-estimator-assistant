@@ -11,8 +11,10 @@ import fetch from "node-fetch";
  * ✅ Fully compatible with Jira Forge parsing
  */
 
-export async function openaiEstimate(summary, description, model) {
+export async function openaiEstimate(summary, description, model, jiraMeta = {}) {
   const OPENAI_KEY = process.env.OPENAI_API_KEY;
+
+  const crim_type = jiraMeta?.crim_type ?? "Unknown";
 
   if (!OPENAI_KEY) {
     return {
@@ -25,65 +27,101 @@ export async function openaiEstimate(summary, description, model) {
 
   // ✅ FULL ENTERPRISE PROMPT (STRICT JSON)
   const prompt = `
-You are an expert Senior IFS Technical Architect specializing in effort estimation.
+You are a Senior IFS Technical Architect with extensive experience implementing
+IFS Applications Cloud, IFS Aurena, IFS Integration Framework, Lobby, Reports,
+Custom Objects, BPA, Interfaces, and Data Migration.
 
-Your job is to estimate ONLY the development effort (in hours) for a Jira ticket.
+You have delivered multiple enterprise implementations following IFS best
+practices, including extensibility, upgrade-safe customization, and performance
+compliance.
 
-STRICT OUTPUT FORMAT:
-Return ONLY this JSON object with no additional text:
+Your task is to classify ONLY the TECHNICAL COMPLEXITY of a Jira requirement.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INPUT CONTEXT (FROM JIRA)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CRIM TYPE:
+${crim_type}
+
+Summary:
+${summary}
+
+Description:
+${description}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLASSIFICATION RULES (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. You MUST determine complexity based on:
+   - IFS functional scope
+   - Data model impact
+   - Custom Object / Screen / Business Logic depth
+   - Number of entities involved
+   - Validation rules, API usage, and orchestration
+   - Upgrade-safe extensibility principles
+   - Integration direction and data volume
+   - Testing and regression impact
+
+2. You MUST consider IFS architectural implications such as:
+   - Custom Objects vs Core Modifications
+   - Use of IFS APIs, Event Actions, BPA, Lobby Elements
+   - Security, projections, and permission complexity
+   - View vs Transactional logic
+   - Online vs background execution
+
+3. Use IFS enterprise judgment similar to what is described in official
+   IFS architecture and extensibility documentation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPLEXITY SCALE (STRICT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Choose ONE value only:
+
+- Very Simple
+  * Configuration-only
+  * No new logic
+  * Single view or small UI tweak
+
+- Simple
+  * Single entity impact
+  * Minimal validation or event logic
+  * Straightforward customization
+
+- Medium
+  * Multiple entities or joins
+  * Clear business rules
+  * Some validations, APIs, or BPM logic
+
+- Complex
+  * Multiple integrations or transactions
+  * Performance considerations
+  * Heavy business rules and validations
+
+- Very Complex
+  * Cross-module impact
+  * Complex orchestration, migration, or integrations
+  * Upgrade-sensitive areas
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRICT OUTPUT FORMAT (JSON ONLY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Return ONLY the following JSON — no additional text:
+
 {
-  "effort": <number>,
-  "complexity": "<Very Simple | Simple | Medium | Complex | Very Complex>",
-  "direction": "<Inbound | Outbound>",
-  "flow": "<Uni-Directional | Bi-Directional>",
-  "reason": "<short markdown explanation>"
+  "complexity": "Very Simple | Simple | Medium | Complex | Very Complex",
+  "direction": "Inbound | Outbound",
+  "flow": "Uni-Directional | Bi-Directional",
+  "reason": "Short, professional, IFS-focused technical explanation"
 }
 
-RULES:
-- Never output anything except valid JSON.
-- Never apologise.
-- Never ask for more details.
-- If unclear, estimate your closest reasonable numeric effort.
-- "effort" must be > 0.
-- JSON must always be valid.
-
-### COMPLEXITY RUBRIC:
-1. Very Simple:
-   - Basic configuration, small UI tasks, single-view Quick Reports.
-   - No logic, no PL/SQL, minimal joins.
-
-2. Simple:
-   - Single table or simple join.
-   - Basic Event Actions, formatting changes.
-
-3. Medium:
-   - Multi-view joins (2–3), PL/SQL wrapper, custom fields with expressions.
-   - Simple bi-directional sync.
-
-4. Complex:
-   - 4+ table joins, PL/SQL API package, heavy validation logic.
-   - Performance tuning required.
-
-5. Very Complex:
-   - New LUs, complex data migrations, deep IFS core logic modifications.
-
-### DIRECTION & FLOW:
-Infer based on description.
-
-### INTERNAL EFFORT LOGIC (must be applied):
-- Base Design Days = 3.1625
-- Weightage:
-    Very Simple = 0.2  
-    Simple = 0.5  
-    Medium = 0.75  
-    Complex = 1.0  
-    Very Complex = 2.0  
-- Convert days → hours (1 day = 8 hours)
-- effort = Tech Design Hours + Dev Hours + Review + Docs + Mgmt + Testing
-
-INPUT:
-Summary: ${summary}
-Description: ${description}
+IMPORTANT:
+- DO NOT calculate effort
+- DO NOT mention hours or days
+- DO NOT suggest changes to CRIM or subtype
 `.trim();
 
   try {
@@ -134,22 +172,15 @@ Description: ${description}
       };
     }
 
-    // ✅ Validate "effort"
-    if (!parsed.effort || typeof parsed.effort !== "number") {
-      return {
-        ok: false,
-        code: "AI_PARSE",
-        message: "'effort' missing or invalid.",
-        retryable: true,
-        detail: parsed
-      };
-    }
-
-    return {
-      ok: true,
-      effort: parsed.effort,
-      meta: parsed // includes complexity, direction, flow, reasoning
-    };
+	return {
+	  ok: true,
+	  meta: {
+		complexity: parsed.complexity,
+		direction: parsed.direction,
+		flow: parsed.flow,
+		reason: parsed.reason
+	  }
+	};
 
   } catch (e) {
     return {

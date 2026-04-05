@@ -28,8 +28,19 @@ export const run = async (event) => {
   console.log("Summary:", summary);
   console.log("Description:", description);
 
+  // ✅ Read Custom Field: customfield_10187 (single-select dropdown)
+  const crim_type =
+  data.fields["customfield_10187"]?.value ?? "Unknown";
+
+  console.log("CRIM Type:", crim_type);
+
   // ✅ Call estimator WITH issueKey
-  const estResult = await estimate(summary, description, issueKey);
+  const estResult = await estimate(
+	  summary,
+	  description,
+	  issueKey,
+	  { crim_type }
+	);
   console.log("Estimated Effort:", estResult);
 
   // ✅ Handle estimator error
@@ -38,7 +49,7 @@ export const run = async (event) => {
     return estResult;
   }
 
-  const hours = estResult.data.effort;
+  const hours = estResult.data.finalEffort;
 
   // ✅ Update Jira Original Estimate field
   await api.asApp().requestJira(route`/rest/api/3/issue/${issueKey}`, {
@@ -56,6 +67,7 @@ export const run = async (event) => {
   });
 
   console.log("✅ Jira Original Estimate updated.");
+
 
   return estResult;
 };

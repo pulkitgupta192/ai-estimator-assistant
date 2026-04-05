@@ -77,6 +77,105 @@ function normalizeFlow(flow) {
   return "Uni-Directional";
 }
 
+function buildWbsTable(wbs) {
+  return {
+    type: "table",
+    attrs: {
+      isNumberColumnEnabled: false,
+      layout: "default"
+    },
+    content: [
+      // ✅ Header row
+      {
+        type: "tableRow",
+        content: [
+          {
+            type: "tableHeader",
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "Activity" }]
+              }
+            ]
+          },
+          {
+            type: "tableHeader",
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "Hours" }]
+              }
+            ]
+          }
+        ]
+      },
+
+      // ✅ Data rows
+      ...Object.entries(wbs).map(([activity, hours]) => ({
+        type: "tableRow",
+        content: [
+          {
+            type: "tableCell",
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: activity }]
+              }
+            ]
+          },
+          {
+            type: "tableCell",
+            content: [
+              {
+                type: "paragraph",
+                content: [
+                  { type: "text", text: Number(hours).toFixed(1) }
+                ]
+              }
+            ]
+          }
+        ]
+      }))
+    ]
+  };
+}
+
+function buildSummaryTable({
+  finalEffort,
+  complexity,
+  isInterface,
+  direction,
+  flow
+}) {
+  const rows = [
+    ["Total Estimated Hours", `${finalEffort.toFixed(1)} h`],
+    ["Complexity", complexity]
+  ];
+
+  if (isInterface) {
+    rows.push(["Direction", direction]);
+    rows.push(["Flow", flow]);
+  }
+
+  return {
+    type: "table",
+    attrs: { isNumberColumnEnabled: false },
+    content: rows.map(([key, value], index) => ({
+      type: "tableRow",
+      content: [
+        {
+          type: index === 0 ? "tableHeader" : "tableCell",
+          content: [{ type: "paragraph", content: [{ type: "text", text: key }] }]
+        },
+        {
+          type: index === 0 ? "tableHeader" : "tableCell",
+          content: [{ type: "paragraph", content: [{ type: "text", text: value }] }]
+        }
+      ]
+    }))
+  };
+}
+
 export async function estimate(summary, description, issueKey, jiraMeta = {}) {
   console.log("ENV AI_PROVIDER:", process.env.AI_PROVIDER);
   console.log("ENV AI_MODEL:", process.env.AI_MODEL);
@@ -169,54 +268,73 @@ export async function estimate(summary, description, issueKey, jiraMeta = {}) {
 	}
 
     const { wbs, finalEffort } = buildWbs(baseTotalEffort);
-    const wbsMarkdown = wbsToMarkdown(wbs);
+		
+	const wbsTable = buildWbsTable(wbs);
+
+	const roundedFinalEffort = Math.round(finalEffort * 10) / 10;
 	
-    const commentBody = `
-### ✅ AI Effort Estimate
+	const summaryTable = buildSummaryTable({
+	  finalEffort: roundedFinalEffort,
+	  complexity,
+	  isInterface,
+	  direction: normalizedDirection,
+	  flow: normalizedFlow
+	});
 
-**Total Estimated Hours:** ${finalEffort.toFixed(1)}h
-**Complexity:** ${complexity}
-${isInterface ? `**Direction:** ${normalizedDirection}` : ""}
-${isInterface ? `**Flow:** ${normalizedFlow}` : ""}
----
+	await api.asApp().requestJira(
+	  route`/rest/api/3/issue/${issueKey}/comment`,
+	  {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+		  body: {
+			type: "doc",
+			version: 1,
+			content: [
+			  // 🔹 Heading
+			  {
+				type: "heading",
+				attrs: { level: 3 },
+				content: [{ type: "text", text: "✅ AI Effort Estimate Summary" }]
+			  },
 
-${wbsMarkdown}
+			  // 🔹 Summary table (already implemented by you)
+			  summaryTable,
 
----
+			  // Spacer
+			  { type: "paragraph", content: [{ type: "text", text: " " }] },
 
-### 🧠 AI Reasoning
-${meta.reason}
-`.trim();
-													   
-	console.log(`✅ Final Effort: ${finalEffort} hours`);
+			  // 🔹 WBS Heading
+			  {
+				type: "heading",
+				attrs: { level: 4 },
+				content: [{ type: "text", text: "🧩 Work Breakdown Structure" }]
+			  },
 
-	console.log("Issue Key - WBS :\n", issueKey);
+			  // 🔹 NATIVE WBS TABLE ✅
+			  wbsTable,
 
-    // ✅ POST Jira Comment
-    console.log("Posting Jira Comment...");
-										   
-    await api.asApp().requestJira(
-      route`/rest/api/3/issue/${issueKey}/comment`,
-      {
-        method: "POST",
+			  // Spacer
+			  { type: "paragraph", content: [{ type: "text", text: " " }] },
+
+			  // 🔹 Reasoning heading
+			  {
+				type: "heading",
+				attrs: { level: 4 },
+				content: [{ type: "text", text: "🧠 AI Reasoning" }]
+			  },
+
+			  // 🔹 Reasoning content
+			  {
+				type: "paragraph",
+				content: [{ type: "text", text: meta.reason }]
+			  }
+			]
+		  }
+		})
+	  }
+	);
 			
-        headers: { "Content-Type": "application/json" },
-	
-        body: JSON.stringify({
-          body: {
-            type: "doc",
-            version: 1,
-            content: [
-              {
-                type: "paragraph",
-                content: [{ type: "text", text: commentBody }]	 
-              }
-            ]		  
-          }
-        })
-      }
-    );
-								  
     return {
       ok: true,
       data: { finalEffort, meta, wbs }

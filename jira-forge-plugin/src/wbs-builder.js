@@ -37,19 +37,3 @@ export function buildWbs(baseTotalEffort) {
 	roundedFinalEffort
   };
 }
-
-/**
- * Convert WBS structure into Jira-friendly markdown
- */
-export function wbsToMarkdown(wbs) {
-  let md = `### 🧩 Work Breakdown Structure (WBS)\n\n`;
-  md += `| Activity | Hours |\n`;
-  md += `|---------|--------|\n`;
-
-  for (const [key, value] of Object.entries(wbs)) {
-    md += `| ${key} | ${value.toFixed(1)} |\n`;
-``
-  }
-
-  return md;
-}

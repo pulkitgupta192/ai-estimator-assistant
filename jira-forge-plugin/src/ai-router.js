@@ -267,7 +267,7 @@ export async function estimate(summary, description, issueKey, jiraMeta = {}) {
 	  };
 	}
 
-    const { wbs, finalEffort } = buildWbs(baseTotalEffort);
+    const { wbs, finalEffort } = buildWbs(baseTotalEffort, complexity);
 		
 	const wbsTable = buildWbsTable(wbs);
 
